@@ -8,8 +8,7 @@
       "android": {
         "buildType": "apk"
       },
-      "distribution": "internal",
-      "workingDirectory": "./CheckersOnline"
+      "distribution": "internal"
     }
   },
   "submit": {

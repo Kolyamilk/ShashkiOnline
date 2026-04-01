@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Шашки и точка",
+    "slug": "CheckersOnline",
+    "version": "1.1.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.checkersonline"
+    },
+    "android": {
+      "versionCode": 12,
+      "package": "com.anonymous.CheckersOnline",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "WAKE_LOCK"
+      ],
+      "useNextNotificationsApi": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#4ECDC4"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2882c370-0354-4a8d-a86e-f36f0cb9d5e9"
+      }
+    }
+  }
+}

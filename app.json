@@ -37,11 +37,7 @@
         }
       ]
     ],
-    "extra": {
-      "eas": {
-        "projectId": "2882c370-0354-4a8d-a86e-f36f0cb9d5e9"
-      }
-    },
+    
     "owner": "kolyamilka"
   }
 }

@@ -20,7 +20,10 @@ const cleanupGame = async (gameId) => {
   if (!gameId) return;
   try {
     console.log(`🧹 Очистка игры ${gameId}...`);
-    await remove(ref(db, `games_checkers/${gameId}`));
+      await update(ref(db, `games_checkers/${gameId}`), {
+      status: 'finished',
+      finishedAt: Date.now(),
+    });
     const invitationsRef = ref(db, 'invitations');
     const snapshot = await get(invitationsRef);
     if (snapshot.exists()) {
@@ -57,8 +60,6 @@ const updateStats = async (winnerId, loserId) => {
 
 const OnlineGameScreen = ({ route, navigation }) => {
   const { gameId, playerKey, myRole } = route.params;
-  const { myPieceColor, opponentPieceColor } = useSettings();
-  
   const [board, setBoard] = useState(initialBoard());
   const [gameData, setGameData] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
@@ -81,7 +82,7 @@ const OnlineGameScreen = ({ route, navigation }) => {
   const currentGameIdRef = useRef(gameId);
   const isInitialized = useRef(false);
   const lastBoardRef = useRef(null);
-  const lastMoveWasMineRef = useRef(false);  // ← ← ← НОВОЕ!
+  const lastMoveWasMineRef = useRef(false);
 
   const endGame = async (resultMessage, winnerId = null, loserId = null) => {
     if (isGameEnding.current) return;
@@ -94,7 +95,6 @@ const OnlineGameScreen = ({ route, navigation }) => {
         console.error('Ошибка обновления статистики:', err);
       }
     }
-
     Alert.alert('Игра окончена', resultMessage, [
       { 
         text: 'OK', 
@@ -114,7 +114,7 @@ const OnlineGameScreen = ({ route, navigation }) => {
     currentGameIdRef.current = gameId;
   }, []);
 
-   const onAnimationFinish = () => {
+  const onAnimationFinish = () => {
     if (!pendingMove) return;
     const finalBoard = pendingBoard.map(r => [...r]);
     const { move, wasCapture, furtherCaptures, willBeKing } = pendingMove;
@@ -128,7 +128,6 @@ const OnlineGameScreen = ({ route, navigation }) => {
     setAnimatingMove(null);
     isAnimatingRef.current = false;
     
-    // ← ← ← Сохраняем доску после анимации!
     lastBoardRef.current = finalBoard;
     
     console.log('✅ Анимация завершена, isAnimatingRef:', isAnimatingRef.current);
@@ -200,7 +199,6 @@ const OnlineGameScreen = ({ route, navigation }) => {
       captured: newCaptured,
     };
 
-    // ← ← ← Помечаем что это был МОЙ ход
     lastMoveWasMineRef.current = true;
     console.log('🎯 Мой ход отправляется в Firebase');
 
@@ -208,7 +206,6 @@ const OnlineGameScreen = ({ route, navigation }) => {
       console.error('Ошибка отправки хода:', err)
     );
 
-    // ← ← ← Запускаем анимацию СРАЗУ
     setPendingBoard(newBoard);
     setPendingMove({ move, wasCapture, furtherCaptures, willBeKing, nextPlayer });
 
@@ -234,160 +231,187 @@ const OnlineGameScreen = ({ route, navigation }) => {
     }
   };
 
-// src/screens/OnlineGameScreen.js - ИСПРАВЛЕНИЕ в useEffect для gameRef
+  useEffect(() => {
+    const loadMyData = async () => {
+      if (!playerKey) return;
+      const userRef = ref(db, `users/${playerKey}`);
+      const snapshot = await get(userRef);
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        setMyName(data.name || 'Игрок');
+        setMyAvatar(data.avatar || '😀');
+      }
+    };
+    loadMyData();
+  }, [playerKey]);
 
-useEffect(() => {
-  const gameRef = ref(db, 'games_checkers/' + gameId);
-  const unsubscribe = onValue(gameRef, (snapshot) => {
-    const data = snapshot.val();
-
-    if (currentGameIdRef.current !== gameId) {
-      console.log('⚠️ Stale listener для gameId:', gameId);
-      return;
+  useEffect(() => {
+    if (gameData?.players) {
+      const playerIds = Object.keys(gameData.players);
+      const opponentId = playerIds.find(id => id !== playerKey);
+      if (opponentId && !opponentName) {
+        const loadOpponentData = async () => {
+          const userRef = ref(db, `users/${opponentId}`);
+          const snapshot = await get(userRef);
+          if (snapshot.exists()) {
+            const oppData = snapshot.val();
+            setOpponentName(oppData.name || 'Соперник');
+            setOpponentAvatar(oppData.avatar || '😎');
+          }
+        };
+        loadOpponentData();
+      }
     }
+  }, [gameData, playerKey]);
 
-    if (!data) {
-      if (!isInitialized.current) {
-        console.log('⏳ Ожидание создания игры...');
+  // ← ← ← ИСПРАВЛЕННЫЙ useEffect для Firebase
+  useEffect(() => {
+    const gameRef = ref(db, 'games_checkers/' + gameId);
+    const unsubscribe = onValue(gameRef, (snapshot) => {
+      const data = snapshot.val();
+
+      if (currentGameIdRef.current !== gameId) {
+        console.log('⚠️ Stale listener для gameId:', gameId);
         return;
       }
-      if (!isGameEnding.current && !isCleanupDone.current) {
-        isCleanupDone.current = true;
-        Alert.alert('Победа!', 'Соперник покинул игру. Ваша победа!', [
-          { 
-            text: 'OK', 
-            onPress: async () => {
-              await cleanupGame(gameId);
-              if (resetInviteFlags) resetInviteFlags();
-              navigation.replace('Menu');
-            }
-          }
-        ]);
-      }
-      return;
-    }
 
-    if (!isInitialized.current) isInitialized.current = true;
-
-    if (!data.board || !Array.isArray(data.board)) {
-      console.log('⏳ Доска ещё не создана или некорректна, жду...');
-      return;
-    }
-
-    setGameData(data);
-    setCaptured(data.captured || { white: 0, black: 0 });
-
-    const newBoard = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(null));
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (data.board[r] && data.board[r][c]) newBoard[r][c] = data.board[r][c];
-      }
-    }
-
-    // ← ← ← Сравниваем с lastBoardRef
-    const boardToCompare = lastBoardRef.current || newBoard;
-    const hasChanged = lastBoardRef.current ? JSON.stringify(boardToCompare) !== JSON.stringify(newBoard) : false;
-    
-    // ← ← ← Проверяем был ли это мой ход
-    const wasMyLastMove = lastMoveWasMineRef.current;
-    
-    console.log('📊 Firebase update:', { 
-      hasChanged, 
-      isAnimating: isAnimatingRef.current,
-      wasMyLastMove,
-      hasLastBoard: !!lastBoardRef.current
-    });
-
-    // ← ← ← Анимация ТОЛЬКО если:
-    // 1. Доска изменилась
-    // 2. Нет текущей анимации
-    // 3. Это НЕ был мой последний ход (значит ход соперника)
-    // 4. Есть lastBoardRef (не первое обновление)
-    if (hasChanged && !animatingMove && !isAnimatingRef.current && !wasMyLastMove && lastBoardRef.current) {
-      console.log('🎬 Запуск анимации хода соперника...');
-      
-      let from = null, to = null, movedPiece = null;
-      
-      // ← ← ← Сравниваем с lastBoardRef
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-          const oldPiece = boardToCompare[r]?.[c];
-          const newPiece = newBoard[r][c];
-          if (oldPiece && !newPiece) { from = { row: r, col: c }; movedPiece = oldPiece; }
-          else if (!oldPiece && newPiece) { to = { row: r, col: c }; }
+      if (!data) {
+        if (!isInitialized.current) {
+          console.log('⏳ Ожидание создания игры...');
+          return;
         }
-      }
-
-      if (from && to && movedPiece) {
-        // ← ← ← ПРОВЕРЯЕМ ЧЕЙ это был ход по piece.player!
-        const isOpponentMove = movedPiece.player !== myRole;
-        
-        console.log('📍 Найдено:', { from, to, movedPiece, isOpponentMove });
-
-        if (isOpponentMove) {
-          let wasCapture = false, capturedRow = null, capturedCol = null;
-          for (let r = 0; r < BOARD_SIZE; r++) {
-            for (let c = 0; c < BOARD_SIZE; c++) {
-              const oldPiece = boardToCompare[r]?.[c];
-              const newPiece = newBoard[r][c];
-              if (oldPiece && !newPiece && (r !== from.row || c !== from.col)) {
-                wasCapture = true;
-                capturedRow = r;
-                capturedCol = c;
-                break;
+        if (!isGameEnding.current && !isCleanupDone.current) {
+          isCleanupDone.current = true;
+          Alert.alert('Победа!', 'Соперник покинул игру. Ваша победа!', [
+            { 
+              text: 'OK', 
+              onPress: async () => {
+                await cleanupGame(gameId);
+                navigation.replace('Menu');
               }
             }
+          ]);
+        }
+        return;
+      }
+
+      if (!isInitialized.current) isInitialized.current = true;
+
+      if (!data.board || !Array.isArray(data.board)) {
+        console.log('⏳ Доска ещё не создана или некорректна, жду...');
+        return;
+      }
+
+      setGameData(data);
+      setCaptured(data.captured || { white: 0, black: 0 });
+
+      const newBoard = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(null));
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (data.board[r] && data.board[r][c]) newBoard[r][c] = data.board[r][c];
+        }
+      }
+
+      const boardToCompare = lastBoardRef.current || newBoard;
+      const hasChanged = lastBoardRef.current ? JSON.stringify(boardToCompare) !== JSON.stringify(newBoard) : false;
+      
+      const wasMyLastMove = lastMoveWasMineRef.current;
+      
+      console.log('📊 Firebase update:', { 
+        hasChanged, 
+        isAnimating: isAnimatingRef.current,
+        wasMyLastMove,
+        hasLastBoard: !!lastBoardRef.current
+      });
+
+      // ← ← ← Анимация ТОЛЬКО если:
+      // 1. Доска изменилась
+      // 2. Нет текущей анимации
+      // 3. Это НЕ был мой последний ход
+      // 4. Есть lastBoardRef
+      if (hasChanged && !animatingMove && !isAnimatingRef.current && !wasMyLastMove && lastBoardRef.current) {
+        console.log('🎬 Запуск анимации хода соперника...');
+        
+        let from = null, to = null, movedPiece = null;
+        
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          for (let c = 0; c < BOARD_SIZE; c++) {
+            const oldPiece = boardToCompare[r]?.[c];
+            const newPiece = newBoard[r][c];
+            if (oldPiece && !newPiece) { from = { row: r, col: c }; movedPiece = oldPiece; }
+            else if (!oldPiece && newPiece) { to = { row: r, col: c }; }
           }
+        }
 
-          const willBeKing = (!movedPiece.king && ((movedPiece.player === 1 && to.row === 7) || (movedPiece.player === 2 && to.row === 0)));
-          const newKing = movedPiece.king ? true : willBeKing;
+        if (from && to && movedPiece) {
+          // ← ← ← ПРОВЕРЯЕМ ЧЕЙ это был ход ПО piece.player!
+          const isOpponentMove = movedPiece.player !== myRole;
+          
+          console.log('📍 Найдено:', { from, to, movedPiece, isOpponentMove });
 
-          const tempBoard = newBoard.map(r => [...r]);
-          if (willBeKing) tempBoard[to.row][to.col].king = true;
-          const furtherCaptures = getCaptureMoves(tempBoard, to.row, to.col, movedPiece.player);
+          if (isOpponentMove) {
+            let wasCapture = false, capturedRow = null, capturedCol = null;
+            for (let r = 0; r < BOARD_SIZE; r++) {
+              for (let c = 0; c < BOARD_SIZE; c++) {
+                const oldPiece = boardToCompare[r]?.[c];
+                const newPiece = newBoard[r][c];
+                if (oldPiece && !newPiece && (r !== from.row || c !== from.col)) {
+                  wasCapture = true;
+                  capturedRow = r;
+                  capturedCol = c;
+                  break;
+                }
+              }
+            }
 
-          setPendingBoard(newBoard);
-          setPendingMove({
-            move: { fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, capturedRow, capturedCol },
-            wasCapture,
-            furtherCaptures,
-            willBeKing,
-            nextPlayer: data.currentPlayer,
-          });
-          setAnimatingMove({ from, to, piece: { ...movedPiece, king: newKing } });
-          isAnimatingRef.current = true;
-          console.log('✅ Анимация соперника запущена');
+            const willBeKing = (!movedPiece.king && ((movedPiece.player === 1 && to.row === 7) || (movedPiece.player === 2 && to.row === 0)));
+            const newKing = movedPiece.king ? true : willBeKing;
+
+            const tempBoard = newBoard.map(r => [...r]);
+            if (willBeKing) tempBoard[to.row][to.col].king = true;
+            const furtherCaptures = getCaptureMoves(tempBoard, to.row, to.col, movedPiece.player);
+
+            setPendingBoard(newBoard);
+            setPendingMove({
+              move: { fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, capturedRow, capturedCol },
+              wasCapture,
+              furtherCaptures,
+              willBeKing,
+              nextPlayer: data.currentPlayer,
+            });
+            setAnimatingMove({ from, to, piece: { ...movedPiece, king: newKing } });
+            isAnimatingRef.current = true;
+            console.log('✅ Анимация соперника запущена');
+          } else {
+            console.log('⚠️ Это был мой ход (уже анимирован), просто обновляем доску');
+            setBoard(newBoard);
+          }
         } else {
-          console.log('⚠️ Это был мой ход (уже анимирован), просто обновляем доску');
+          console.log('⚠️ Не удалось определить ход соперника');
           setBoard(newBoard);
         }
-      } else {
-        console.log('⚠️ Не удалось определить ход соперника');
+      } else if (hasChanged) {
+        console.log('📊 Обновление доски (ваш ход или анимация идёт)');
         setBoard(newBoard);
       }
-    } else if (hasChanged) {
-      console.log('📊 Обновление доски (ваш ход или анимация идёт)');
-      setBoard(newBoard);
-    }
 
-    // ← ← ← Сохраняем доску И сбрасываем флаг
-    lastBoardRef.current = newBoard;
-    lastMoveWasMineRef.current = false;
-    
-    console.log('💾 lastBoardRef сохранён, hasLastBoard:', !!lastBoardRef.current);
+      lastBoardRef.current = newBoard;
+      lastMoveWasMineRef.current = false;
+      
+      console.log('💾 lastBoardRef сохранён, hasLastBoard:', !!lastBoardRef.current);
 
-    setLoading(false);
-    if (data.currentPlayer !== playerKey) {
-      setSelectedCell(null);
-      setValidMoves([]);
-    }
-  });
+      setLoading(false);
+      if (data.currentPlayer !== playerKey) {
+        setSelectedCell(null);
+        setValidMoves([]);
+      }
+    });
 
-  return () => {
-    console.log('🧹 OnlineGameScreen размонтирован');
-    unsubscribe();
-  };
-}, [gameId, playerKey, myRole]);
+    return () => {
+      console.log('🧹 OnlineGameScreen размонтирован');
+      unsubscribe();
+    };
+  }, [gameId, playerKey, myRole]);  // ← ← ← Добавили myRole в зависимости!
 
   useFocusEffect(
     useCallback(() => {

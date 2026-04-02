@@ -58,7 +58,7 @@ function AppNavigator() {
       return false;
     }
     try {
-      navigationRef.current.navigate('OnlineGame', { gameId, playerKey, myRole });
+      navigationRef.current.navigate('OnlineGame', { gameId, playerKey, myRole, resetInviteFlags });
       pendingGameId.current = null;
       return true;
     } catch (error) {

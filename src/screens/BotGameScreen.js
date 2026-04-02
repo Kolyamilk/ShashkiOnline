@@ -68,14 +68,12 @@ const BotGameScreen = ({ route, navigation }) => {
 
       if (gameIdRef.current) {
         const botGameRef = ref(db, `bot_games/${gameIdRef.current}`);
-        await set(botGameRef, {
-          playerId: userId,
-          difficulty: difficulty,
-          status: 'finished',
-          finishedAt: Date.now(),
-          result: winner === 1 ? 'player_win' : (winner === 2 ? 'bot_win' : 'draw'),
-        }).catch(console.error);
-        console.log('📝 Обновлён статус игры в bot_games');
+       await update(botGameRef, {  // ← Используем update вместо set!
+      status: 'finished',
+      finishedAt: Date.now(),
+      result: winner === 1 ? 'player_win' : (winner === 2 ? 'bot_win' : 'draw'),
+    }).catch(console.error);
+    console.log('📝 Обновлён статус игры в bot_games');
       }
 
       Alert.alert('Игра окончена', resultMessage, [

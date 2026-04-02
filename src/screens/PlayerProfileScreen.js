@@ -1,5 +1,5 @@
 // src/screens/PlayerProfileScreen.js
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { sendPushNotification } from '../utils/notifications';
 const PlayerProfileScreen = ({ route, navigation }) => {
   const { playerId } = route.params;
   const { userId } = useAuth();
+  
   const [playerData, setPlayerData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
@@ -30,6 +31,56 @@ const PlayerProfileScreen = ({ route, navigation }) => {
   const [hasPendingInvite, setHasPendingInvite] = useState(false);
 
   const gameCreatedRef = useRef(false);
+  const subscriptionsRef = useRef({
+    games: null,
+    botGames: null,
+  });
+
+  // ← ← ← ИСПРАВЛЕННАЯ функция проверки статуса игры (с useCallback)
+  const checkPlayerGameStatus = useCallback(async () => {
+    try {
+      console.log(`🔍 Проверка статуса игры для ${playerId}...`);
+      
+      // 1. Проверяем игры PvP
+      const gamesRef = ref(db, 'games_checkers');
+      const gamesSnap = await get(gamesRef);
+      if (gamesSnap.exists()) {
+        const games = gamesSnap.val();
+        for (const [gid, game] of Object.entries(games)) {
+          // ← ← ← КРИТИЧНО: проверяем status === 'active' И игра недавняя
+          const isRecent = game.createdAt && (Date.now() - game.createdAt < 600000); // 10 минут
+          if (game.status === 'active' && game.players && game.players[playerId] && isRecent) {
+            console.log(`✅ Найдена активная PvP игра: ${gid}`);
+            setPlayerGameStatus({ inGame: true, gameType: 'pvp', gameId: gid });
+            return;
+          }
+        }
+      }
+
+      // 2. Проверяем игры с ботом
+      const botGamesRef = ref(db, 'bot_games');
+      const botSnap = await get(botGamesRef);
+      if (botSnap.exists()) {
+        const botGames = botSnap.val();
+        for (const [gid, game] of Object.entries(botGames)) {
+          // ← ← ← КРИТИЧНО: проверяем status === 'active' И игра недавняя
+          const isRecent = game.startedAt && (Date.now() - game.startedAt < 600000); // 10 минут
+          if (game.status === 'active' && game.playerId === playerId && isRecent) {
+            console.log(`✅ Найдена активная игра с ботом: ${gid}`);
+            setPlayerGameStatus({ inGame: true, gameType: 'bot', gameId: gid });
+            return;
+          }
+        }
+      }
+
+      // ← ← ← Если ничего не нашли - СБРАСЫВАЕМ статус!
+      console.log('❌ Активных игр не найдено, сбрасываем статус');
+      setPlayerGameStatus({ inGame: false, gameType: null, gameId: null });
+    } catch (error) {
+      console.error('Ошибка проверки статуса игры:', error);
+      setPlayerGameStatus({ inGame: false, gameType: null, gameId: null });
+    }
+  }, [playerId]);
 
   // Получение данных игрока и его статуса
   useEffect(() => {
@@ -50,7 +101,7 @@ const PlayerProfileScreen = ({ route, navigation }) => {
         }
 
         await checkSentInvite();
-        await checkPlayerGameStatus();   // ← новая функция
+        await checkPlayerGameStatus();  // ← Вызываем после определения
         await checkPlayerHasPendingInvite();
       } catch (error) {
         console.error(error);
@@ -60,7 +111,7 @@ const PlayerProfileScreen = ({ route, navigation }) => {
       }
     };
     fetchPlayerData();
-  }, [playerId, userId]);
+  }, [playerId, userId]);  // ← ← ← checkPlayerGameStatus НЕ в зависимостях здесь!
 
   // Подписка на изменения приглашений (отправленные мной)
   useEffect(() => {
@@ -80,26 +131,45 @@ const PlayerProfileScreen = ({ route, navigation }) => {
     return () => off(invitationsRef);
   }, [userId, playerId]);
 
-  // Подписка на статус игры игрока (PVP, бот, соло)
+  // ← ← ← ИСПРАВЛЕННЫЙ useEffect для подписки на статус игры
   useEffect(() => {
-    const checkGameStatus = async () => {
-      await checkPlayerGameStatus();
-    };
-    checkGameStatus();
+    console.log(`📡 Подписка на статус игры для ${playerId}`);
+    
+    // Сначала проверяем текущий статус
+    checkPlayerGameStatus();
 
-    // Слушаем изменения в games_checkers (игры с игроками)
+    // ← ← ← Подписка на games_checkers (сохраняем функцию отписки!)
     const gamesRef = ref(db, 'games_checkers');
-    const unsubscribeGames = onValue(gamesRef, () => checkPlayerGameStatus());
+    const unsubscribeGames = onValue(gamesRef, async () => {
+      console.log('🔄 Изменение в games_checkers, проверяем статус...');
+      await checkPlayerGameStatus();
+    });
 
-    // Слушаем изменения в bot_games (если есть) – пример структуры
+    // ← ← ← Подписка на bot_games (сохраняем функцию отписки!)
     const botGamesRef = ref(db, 'bot_games');
-    const unsubscribeBot = onValue(botGamesRef, () => checkPlayerGameStatus());
+    const unsubscribeBot = onValue(botGamesRef, async () => {
+      console.log('🔄 Изменение в bot_games, проверяем статус...');
+      await checkPlayerGameStatus();
+    });
+
+    // Сохраняем подписки
+    subscriptionsRef.current = {
+      games: unsubscribeGames,
+      botGames: unsubscribeBot,
+    };
 
     return () => {
+      console.log('🧹 Очистка подписок на статус игры');
+      // ← ← ← ПРАВИЛЬНАЯ очистка: используем функции отписки!
+      if (typeof unsubscribeGames === 'function') unsubscribeGames();
+      if (typeof unsubscribeBot === 'function') unsubscribeBot();
+      // Также вызываем off для надёжности
       off(gamesRef);
       off(botGamesRef);
+      // ← ← ← Сбрасываем статус при размонтировании
+      setPlayerGameStatus({ inGame: false, gameType: null, gameId: null });
     };
-  }, [playerId]);
+  }, [playerId, checkPlayerGameStatus]);  // ← ← ← Правильные зависимости
 
   // Подписка на входящие приглашения для этого игрока
   useEffect(() => {
@@ -120,6 +190,8 @@ const PlayerProfileScreen = ({ route, navigation }) => {
 
   // Автоматический переход в игру, если появилась активная игра для текущего пользователя
   useEffect(() => {
+    if (playerId !== userId) return;  // ← Только для своего профиля
+    
     const gamesRef = ref(db, 'games_checkers');
     const unsubscribe = onValue(gamesRef, (snapshot) => {
       const games = snapshot.val();
@@ -136,9 +208,9 @@ const PlayerProfileScreen = ({ route, navigation }) => {
       }
     });
     return () => off(gamesRef);
-  }, [userId, navigation]);
+  }, [userId, navigation, playerId]);
 
-  // ------------------- Вспомогательные функции -------------------
+  // ... остальные функции без изменений ...
   const checkSentInvite = async () => {
     try {
       const invitationsRef = ref(db, 'invitations');
@@ -155,45 +227,6 @@ const PlayerProfileScreen = ({ route, navigation }) => {
       setSentInviteId(null);
     } catch (error) {
       console.error(error);
-    }
-  };
-
-  const checkPlayerGameStatus = async () => {
-    try {
-      // 1. Проверяем игры PvP
-      const gamesRef = ref(db, 'games_checkers');
-      const gamesSnap = await get(gamesRef);
-      if (gamesSnap.exists()) {
-        const games = gamesSnap.val();
-        for (const [gid, game] of Object.entries(games)) {
-          if (game.status === 'active' && game.players && game.players[playerId]) {
-            setPlayerGameStatus({ inGame: true, gameType: 'pvp', gameId: gid });
-            return;
-          }
-        }
-      }
-
-      // 2. Проверяем игры с ботом (предполагаем узел bot_games)
-      const botGamesRef = ref(db, 'bot_games');
-      const botSnap = await get(botGamesRef);
-      if (botSnap.exists()) {
-        const botGames = botSnap.val();
-        for (const [gid, game] of Object.entries(botGames)) {
-          if (game.status === 'active' && game.playerId === playerId) {
-            setPlayerGameStatus({ inGame: true, gameType: 'bot', gameId: gid });
-            return;
-          }
-        }
-      }
-
-      // 3. Проверяем одиночные игры (если есть)
-      // (можно добавить по аналогии)
-
-      // Если ничего не нашли
-      setPlayerGameStatus({ inGame: false, gameType: null, gameId: null });
-    } catch (error) {
-      console.error('Ошибка проверки статуса игры:', error);
-      setPlayerGameStatus({ inGame: false, gameType: null, gameId: null });
     }
   };
 
@@ -438,6 +471,7 @@ const PlayerProfileScreen = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  // ... ваши стили без изменений ...
   container: {
     flex: 1,
     backgroundColor: colors.background,

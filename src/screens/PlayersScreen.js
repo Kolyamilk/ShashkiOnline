@@ -12,15 +12,17 @@ import {
 import { ref, get, onValue, off } from 'firebase/database';
 import { db } from '../firebase/config';
 import { colors } from '../styles/globalStyles';
+import { useAuth } from '../context/AuthContext';  // ← ← ← Импортируем useAuth
 
 const PlayersScreen = ({ navigation }) => {
+  const { userId } = useAuth();  // ← ← ← Получаем текущий userId
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statuses, setStatuses] = useState({});
   const [pvpGames, setPvpGames] = useState({});
   const [botGames, setBotGames] = useState({});
 
-  // Загружаем список всех пользователей
+  // ← Загружаем список всех пользователей (исключая текущего)
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -28,70 +30,124 @@ const PlayersScreen = ({ navigation }) => {
         const snapshot = await get(usersRef);
         if (snapshot.exists()) {
           const data = snapshot.val();
-          const userList = Object.keys(data).map(key => ({
-            id: key,
-            ...data[key],
-          }));
+          const userList = Object.keys(data)
+            .filter(key => key !== userId)  // ← ← ← ИСКЛЮЧАЕМ текущего пользователя!
+            .map(key => ({
+              id: key,
+              ...data[key],
+            }));
           setPlayers(userList);
+          console.log(`✅ Загружено ${userList.length} игроков (без текущего)`);
         }
       } catch (error) {
-        console.error(error);
+        console.error('❌ Ошибка загрузки пользователей:', error);
       } finally {
         setLoading(false);
       }
     };
     fetchUsers();
-  }, []);
+  }, [userId]);  // ← ← ← Добавили userId в зависимости
 
-  // Подписываемся на онлайн-статусы
+  // ← Подписываемся на онлайн-статусы
   useEffect(() => {
     const statusRef = ref(db, 'status');
     const unsubscribe = onValue(statusRef, (snapshot) => {
       const data = snapshot.val();
-      if (data) setStatuses(data);
-      else setStatuses({});
+      console.log('📡 Status update:', data ? Object.keys(data).length : 'empty');
+      if (data) {
+        setStatuses(data);
+      } else {
+        setStatuses({});
+      }
     });
-    return () => off(statusRef);
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+      off(statusRef);
+    };
   }, []);
 
-  // Подписываемся на игры PvP
+  // ← Подписываемся на игры PvP (с проверкой status === 'active' И время создания)
   useEffect(() => {
+    console.log('📡 Подписка на games_checkers');
     const gamesRef = ref(db, 'games_checkers');
-    const unsubscribe = onValue(gamesRef, (snapshot) => {
+    
+    const handleGamesUpdate = (snapshot) => {
       const data = snapshot.val();
+      console.log('🔄 games_checkers update:', data ? Object.keys(data).length : 'empty');
+      
       if (data) {
         const activeGames = {};
+        const now = Date.now();
+        
         for (const [gameId, game] of Object.entries(data)) {
-          if (game.status === 'active') {
+          // ← ← ← КРИТИЧНО: проверяем status === 'active' И игра недавняя (< 10 минут)
+          const isRecent = game.createdAt && (now - game.createdAt < 600000);
+          
+          if (game && game.status === 'active' && game.players && isRecent) {
             activeGames[gameId] = game;
+            console.log(`✅ Активная PvP игра: ${gameId}`, { 
+              players: game.players, 
+              age: Math.round((now - game.createdAt) / 1000) + 's' 
+            });
           }
         }
+        console.log(`📊 Активных PvP игр: ${Object.keys(activeGames).length}`);
         setPvpGames(activeGames);
       } else {
+        console.log('📊 Активных PvP игр: 0');
         setPvpGames({});
       }
-    });
-    return () => off(gamesRef);
+    };
+    
+    const unsubscribe = onValue(gamesRef, handleGamesUpdate);
+    
+    return () => {
+      console.log('🧹 Очистка подписки games_checkers');
+      if (typeof unsubscribe === 'function') unsubscribe();
+      off(gamesRef);
+    };
   }, []);
 
-  // Подписываемся на игры с ботом
+  // ← Подписываемся на игры с ботом (с проверкой status === 'active' И время создания)
   useEffect(() => {
+    console.log('📡 Подписка на bot_games');
     const botGamesRef = ref(db, 'bot_games');
-    const unsubscribe = onValue(botGamesRef, (snapshot) => {
+    
+    const handleBotGamesUpdate = (snapshot) => {
       const data = snapshot.val();
+      console.log('🔄 bot_games update:', data ? Object.keys(data).length : 'empty');
+      
       if (data) {
         const activeBotGames = {};
+        const now = Date.now();
+        
         for (const [gameId, game] of Object.entries(data)) {
-          if (game.status === 'active') {
+          // ← ← ← КРИТИЧНО: проверяем status === 'active' И игра недавняя (< 10 минут)
+          const isRecent = game.startedAt && (now - game.startedAt < 600000);
+          
+          if (game && game.status === 'active' && game.playerId && isRecent) {
             activeBotGames[gameId] = game;
+            console.log(`✅ Активная игра с ботом: ${gameId}`, { 
+              playerId: game.playerId, 
+              age: Math.round((now - game.startedAt) / 1000) + 's' 
+            });
           }
         }
+        console.log(`📊 Активных игр с ботом: ${Object.keys(activeBotGames).length}`);
         setBotGames(activeBotGames);
       } else {
+        console.log('📊 Активных игр с ботом: 0');
         setBotGames({});
       }
-    });
-    return () => off(botGamesRef);
+    };
+    
+    const unsubscribe = onValue(botGamesRef, handleBotGamesUpdate);
+    
+    return () => {
+      console.log('🧹 Очистка подписки bot_games');
+      if (typeof unsubscribe === 'function') unsubscribe();
+      off(botGamesRef);
+    };
   }, []);
 
   const formatLastSeen = (timestamp) => {
@@ -108,35 +164,49 @@ const PlayersScreen = ({ navigation }) => {
     return `${days} д назад`;
   };
 
+  // ← ← ← Проверка: игрок в активной PvP игре
   const isInPvpGame = (playerId) => {
+    if (!playerId) return false;
     for (const game of Object.values(pvpGames)) {
-      if (game.players && game.players[playerId]) return true;
+      if (game && game.players && typeof game.players === 'object') {
+        if (game.players[playerId] === 1 || game.players[playerId] === 2) {
+          return true;
+        }
+      }
     }
     return false;
   };
 
+  // ← ← ← Проверка: игрок в активной игре с ботом
   const isInBotGame = (playerId) => {
+    if (!playerId) return false;
     for (const game of Object.values(botGames)) {
-      if (game.playerId === playerId) return true;
+      if (game && game.playerId === playerId) {
+        return true;
+      }
     }
     return false;
   };
 
   // ← Получаем текст статуса игры
   const getGameStatusText = (playerId) => {
+    if (!playerId) return null;
     if (isInPvpGame(playerId)) return '🎮 Играет против игрока';
     if (isInBotGame(playerId)) return '🤖 Играет против компьютера';
     return null;
   };
 
+  // ← Сортировка: онлайн сначала, потом по времени последнего входа
   const sortPlayers = (playersList, statusesData) => {
     return [...playersList].sort((a, b) => {
-      const statusA = statusesData[a.id];
-      const statusB = statusesData[b.id];
+      const statusA = statusesData?.[a.id];
+      const statusB = statusesData?.[b.id];
       const onlineA = statusA?.online === true;
       const onlineB = statusB?.online === true;
+      
       if (onlineA && !onlineB) return -1;
       if (!onlineA && onlineB) return 1;
+      
       const lastSeenA = statusA?.lastSeen || 0;
       const lastSeenB = statusB?.lastSeen || 0;
       return lastSeenB - lastSeenA;
@@ -146,32 +216,33 @@ const PlayersScreen = ({ navigation }) => {
   const sortedPlayers = sortPlayers(players, statuses);
 
   const showPlayerStats = (player) => {
-    const totalGames = player.stats?.totalGames || 0;
-    const wins = player.stats?.wins || 0;
+    const totalGames = player?.stats?.totalGames || 0;
+    const wins = player?.stats?.wins || 0;
     const winRate = totalGames === 0 ? 0 : ((wins / totalGames) * 100).toFixed(1);
     Alert.alert(
-      player.name,
+      player?.name || 'Игрок',
       `Сыграно игр: ${totalGames}\nПобед: ${wins}\nПроцент побед: ${winRate}%`,
       [{ text: 'OK' }]
     );
   };
 
   const renderPlayer = ({ item }) => {
-    const status = statuses[item.id];
+    const status = statuses?.[item.id];
     const isOnline = status?.online === true;
     const lastSeen = status?.lastSeen;
-    const gameStatusText = getGameStatusText(item.id);  // ← Получаем текст статуса
+    const gameStatusText = getGameStatusText(item.id);
 
     return (
       <TouchableOpacity 
         style={styles.playerItem} 
         onPress={() => navigation.navigate('PlayerProfile', { playerId: item.id })}
+        onLongPress={() => showPlayerStats(item)}
       >
         <View style={styles.playerInfo}>
-          <Text style={styles.avatar}>{item.avatar}</Text>
+          <Text style={styles.avatar}>{item?.avatar || '😀'}</Text>
           <View style={styles.playerDetails}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{item.name}</Text>
+              <Text style={styles.name}>{item?.name || 'Неизвестный'}</Text>
             </View>
             
             {/* ← Показываем статус игры если есть */}
@@ -202,11 +273,22 @@ const PlayersScreen = ({ navigation }) => {
     );
   }
 
+  if (sortedPlayers.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyText}>Игроки не найдены</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Назад</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>Назад</Text>
+          <Text style={styles.backButtonText}>← Назад</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Игроки</Text>
         <View style={{ width: 50 }} />
@@ -214,14 +296,20 @@ const PlayersScreen = ({ navigation }) => {
 
       <FlatList
         data={sortedPlayers}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item?.id || Math.random().toString()}
         renderItem={renderPlayer}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>Нет других игроков</Text>
+        }
       />
     </View>
   );
 };
+
+
+// ← ← ← СТИЛИ (оставьте ваши существующие стили)
 
 const styles = StyleSheet.create({
   container: {

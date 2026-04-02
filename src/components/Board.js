@@ -6,9 +6,7 @@ import AnimatedPiece from './AnimatedPiece';
 import { BOARD_SIZE } from '../utils/checkersLogic';
 
 const Board = ({ board, selectedCell, validMoves, onSelectCell, myRole, captureMap, animatingMove, onAnimationFinish }) => {
-  // ← ПРОВЕРКА: board существует
   if (!board || !Array.isArray(board) || board.length === 0) {
-    console.log('⚠️ Board: board is null or empty');
     return (
       <View style={styles.boardWrapper}>
         <View style={styles.board}>
@@ -20,18 +18,12 @@ const Board = ({ board, selectedCell, validMoves, onSelectCell, myRole, captureM
     );
   }
 
-  const rowOrder = myRole === 1
-    ? [7, 6, 5, 4, 3, 2, 1, 0]
-    : [0, 1, 2, 3, 4, 5, 6, 7];
+  const rowOrder = myRole === 1 ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
 
-  const isSelected = (row, col) =>
-    selectedCell && selectedCell.row === row && selectedCell.col === col;
-
-  const isValidMoveCell = (row, col) =>
-    validMoves && Array.isArray(validMoves) && validMoves.some(m => m && m.row === row && m.col === col);
-
+  const isSelected = (row, col) => selectedCell && selectedCell.row === row && selectedCell.col === col;
+  const isValidMoveCell = (row, col) => validMoves && Array.isArray(validMoves) && validMoves.some(m => m && m.row === row && m.col === col);
   const isCaptureCell = (row, col) => captureMap && captureMap[`${row}-${col}`];
-
+  
   const isAnimatingCell = (row, col) => {
     if (!animatingMove) return false;
     return (animatingMove.from.row === row && animatingMove.from.col === col) ||
@@ -42,10 +34,8 @@ const Board = ({ board, selectedCell, validMoves, onSelectCell, myRole, captureM
     <View style={styles.boardWrapper}>
       <View style={styles.board}>
         {rowOrder.map((actualRow) => {
-          // ← ПРОВЕРКА: row существует
           const row = board[actualRow];
           if (!row || !Array.isArray(row)) {
-            console.log(`⚠️ Board: row ${actualRow} is invalid`);
             return (
               <View key={actualRow} style={styles.row}>
                 {Array(BOARD_SIZE).fill(null).map((_, col) => (
@@ -58,17 +48,15 @@ const Board = ({ board, selectedCell, validMoves, onSelectCell, myRole, captureM
           return (
             <View key={actualRow} style={styles.row}>
               {row.map((piece, col) => {
-                // ← Безопасная проверка piece
-                const pieceToShow = piece && typeof piece === 'object' ? piece : null;
                 const shouldHidePiece = isAnimatingCell(actualRow, col);
-                const finalPiece = shouldHidePiece ? null : pieceToShow;
+                const pieceToShow = shouldHidePiece ? null : (piece && typeof piece === 'object' ? piece : null);
                 
                 return (
                   <Square
                     key={`${actualRow}-${col}`}
                     row={actualRow}
                     col={col}
-                    piece={finalPiece}
+                    piece={pieceToShow}
                     onPress={onSelectCell}
                     isSelected={isSelected(actualRow, col)}
                     isValidMove={isValidMoveCell(actualRow, col)}
@@ -81,6 +69,8 @@ const Board = ({ board, selectedCell, validMoves, onSelectCell, myRole, captureM
           );
         })}
       </View>
+      
+      {/* ← Анимация рендерится ПОВЕРХ доски */}
       {animatingMove && animatingMove.piece && (
         <AnimatedPiece
           from={animatingMove.from}
@@ -102,11 +92,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#4a2c2c',
     padding: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 10,
+    position: 'relative',  // ← Важно для absolute позиционирования!
+    zIndex: 1,
   },
   board: {
     position: 'relative',

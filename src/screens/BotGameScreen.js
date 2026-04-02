@@ -1,7 +1,7 @@
 // src/screens/BotGameScreen.js
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
-import { ref, set, remove, onValue, off } from 'firebase/database';
+import { ref, set, remove } from 'firebase/database';
 import { db } from '../firebase/config';
 import Board from '../components/Board';
 import { useSettings } from '../context/SettingsContext';
@@ -21,6 +21,7 @@ const BotGameScreen = ({ route, navigation }) => {
   const { difficulty } = route.params;
   const { myPieceColor, opponentPieceColor } = useSettings();
   const { userId } = useAuth();
+  
   const [board, setBoard] = useState(initialBoard());
   const [currentPlayer, setCurrentPlayer] = useState(1);
   const [selectedCell, setSelectedCell] = useState(null);
@@ -31,9 +32,11 @@ const BotGameScreen = ({ route, navigation }) => {
   const [animatingMove, setAnimatingMove] = useState(null);
   const [pendingBoard, setPendingBoard] = useState(null);
   const [pendingMove, setPendingMove] = useState(null);
+  
   const isAnimatingRef = useRef(false);
   const isBotThinkingRef = useRef(false);
   const gameIdRef = useRef(null);
+  const botTurnTriggerRef = useRef(0);  // ← ← ← НОВОЕ: триггер для хода бота
 
   // ← При монтировании создаём запись в bot_games
   useEffect(() => {
@@ -104,25 +107,39 @@ const BotGameScreen = ({ route, navigation }) => {
     isAnimatingRef.current = false;
 
     if (furtherCaptures.length > 0 && wasCapture) {
+      // ← ← ← ЕСТЬ дальнейшие взятия – продолжаем серию
+      console.log('🔁 Продолжение серии взятий');
       setCurrentPiecePos({ row: move.toRow, col: move.toCol });
+      
       if (currentPlayer === 1) {
         // Игрок продолжает
         setSelectedCell({ row: move.toRow, col: move.toCol });
         setValidMoves(furtherCaptures);
       } else {
-        // Бот продолжает – сбрасываем флаг, чтобы эффект бота сработал
+        // Бот продолжает – сбрасываем флаг
         isBotThinkingRef.current = false;
-        setBotThinking(true);
+        setBotThinking(false);
       }
     } else {
-      // Нет дальнейших взятий – переключаем игрока
-      setCurrentPlayer(currentPlayer === 1 ? 2 : 1);
+      // ← ← ← НЕТ дальнейших взятий – переключаем игрока
+      const nextPlayer = currentPlayer === 1 ? 2 : 1;
+      console.log('🔄 Переключаем игрока: Игрок', currentPlayer, '→ Игрок', nextPlayer);
+      
+      setCurrentPlayer(nextPlayer);
+      
+      // ← ← ← КРИТИЧНО: Очищаем ВСЁ при смене игрока!
       setCurrentPiecePos(null);
       setSelectedCell(null);
       setValidMoves([]);
-      if (currentPlayer === 2) {
-        isBotThinkingRef.current = false;
-        setBotThinking(false);
+      
+      // ← ← ← КРИТИЧНО: Сбрасываем флаг бота!
+      isBotThinkingRef.current = false;
+      setBotThinking(false);
+      
+      // ← ← ← НОВОЕ: Триггерим ход бота если сейчас его очередь
+      if (nextPlayer === 2) {
+        botTurnTriggerRef.current += 1;
+        console.log('🤖 Триггер хода бота:', botTurnTriggerRef.current);
       }
     }
 
@@ -131,6 +148,8 @@ const BotGameScreen = ({ route, navigation }) => {
   };
 
   const applyMove = (move) => {
+    console.log('🎯 Применяем ход:', move);
+    
     setSelectedCell(null);
     setValidMoves([]);
 
@@ -171,19 +190,53 @@ const BotGameScreen = ({ route, navigation }) => {
       piece: { ...piece, king: newKing },
     });
     isAnimatingRef.current = true;
+    
+    console.log('🎬 Анимация запущена');
   };
 
-  // Ход бота
+  // ← ← ← Ход бота (ИСПРАВЛЕННЫЙ)
   useEffect(() => {
-    if (currentPlayer !== 2 || gameOver || isBotThinkingRef.current) return;
+    console.log('🤖 Bot useEffect сработал:', { 
+      currentPlayer, 
+      gameOver, 
+      isBotThinking: isBotThinkingRef.current,
+      currentPiecePos,
+      botTurnTrigger: botTurnTriggerRef.current
+    });
+    
+    // ← ← ← ПРОВЕРКИ: когда бот должен ходить
+    if (currentPlayer !== 2) {
+      console.log('🤖 Пропуск: не ход бота (currentPlayer:', currentPlayer, ')');
+      return;
+    }
+    
+    if (gameOver) {
+      console.log('🤖 Пропуск: игра окончена');
+      return;
+    }
+    
+    if (isAnimatingRef.current) {
+      console.log('🤖 Пропуск: идёт анимация');
+      return;
+    }
+    
+    if (isBotThinkingRef.current) {
+      console.log('🤖 Пропуск: бот уже думает');
+      return;
+    }
 
+    // ← ← ← ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ – бот ходит!
+    console.log('🤖 Бот начинает думать...');
     isBotThinkingRef.current = true;
     setBotThinking(true);
 
     const timeout = setTimeout(() => {
       try {
         let move = null;
+        
+        // ← ← ← Если есть продолжение серии взятий
         if (currentPiecePos) {
+          console.log('🤖 Бот продолжает серию взятий с позиции:', currentPiecePos);
           const { row, col } = currentPiecePos;
           const captures = getCaptureMoves(board, row, col, 2);
           if (captures.length > 0) {
@@ -198,28 +251,49 @@ const BotGameScreen = ({ route, navigation }) => {
             };
           }
         } else {
+          // ← ← ← Обычный ход бота
+          console.log('🤖 Бот ищет лучший ход...');
           move = getBestMove(board, 2, difficulty);
         }
 
         if (move) {
+          console.log('🤖 Бот делает ход:', move);
           applyMove(move);
         } else {
+          console.log('🤖 У бота нет ходов – передаём ход игроку');
           setCurrentPlayer(1);
           setCurrentPiecePos(null);
           isBotThinkingRef.current = false;
           setBotThinking(false);
         }
       } catch (error) {
-        console.error('Ошибка в таймере:', error);
+        console.error('❌ Ошибка в таймере бота:', error);
         isBotThinkingRef.current = false;
         setBotThinking(false);
       }
     }, 500);
+    
     return () => clearTimeout(timeout);
-  }, [currentPlayer, gameOver, board, currentPiecePos, difficulty]);
+  }, [
+    currentPlayer, 
+    gameOver, 
+    board, 
+    currentPiecePos, 
+    difficulty,
+    botTurnTriggerRef.current  // ← ← ← НОВОЕ: триггер
+  ]);
 
   const handleSelectCell = (row, col) => {
-    if (currentPlayer !== 1 || gameOver || botThinking || animatingMove || isAnimatingRef.current) return;
+    if (currentPlayer !== 1 || gameOver || botThinking || animatingMove || isAnimatingRef.current) {
+      console.log('⚠️ Ход заблокирован:', { 
+        currentPlayer, 
+        gameOver, 
+        botThinking, 
+        animatingMove: !!animatingMove, 
+        isAnimating: isAnimatingRef.current 
+      });
+      return;
+    }
 
     if (currentPiecePos) {
       if (row === currentPiecePos.row && col === currentPiecePos.col) {
@@ -385,12 +459,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  myTurn: {
-    color: '#4ECDC4',
-  },
-  opponentTurn: {
-    color: '#FF6B6B',
-  },
+  myTurn: { color: '#4ECDC4' },
+  opponentTurn: { color: '#FF6B6B' },
   opponentInfo: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -402,16 +472,8 @@ const styles = StyleSheet.create({
     marginLeft: 20,
     marginBottom: 0,
   },
-  opponentAvatar: {
-    fontSize: 28,
-    marginRight: 8,
-  },
-  opponentName: {
-    fontSize: 18,
-    color: colors.textLight,
-    fontWeight: '600',
-    marginRight: 12,
-  },
+  opponentAvatar: { fontSize: 28, marginRight: 8 },
+  opponentName: { fontSize: 18, color: colors.textLight, fontWeight: '600', marginRight: 12 },
   playerInfo: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -423,27 +485,15 @@ const styles = StyleSheet.create({
     marginLeft: 20,
     marginTop: 0,
   },
-  playerAvatar: {
-    fontSize: 28,
-    marginRight: 8,
-  },
-  playerName: {
-    fontSize: 18,
-    color: colors.textLight,
-    fontWeight: '600',
-    marginRight: 12,
-  },
+  playerAvatar: { fontSize: 28, marginRight: 8 },
+  playerName: { fontSize: 18, color: colors.textLight, fontWeight: '600', marginRight: 12 },
   capturedBadgeSmall: {
     backgroundColor: 'rgba(0,0,0,0.3)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 20,
   },
-  capturedTextSmall: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
+  capturedTextSmall: { fontSize: 14, fontWeight: 'bold', color: '#fff' },
   giveUpButton: {
     position: 'absolute',
     bottom: 30,
@@ -453,11 +503,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 25,
   },
-  giveUpText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  giveUpText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
 
 export default BotGameScreen;

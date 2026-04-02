@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text } from 'react-native';
+// src/components/AnimatedPiece.js
+import React, { useEffect } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSettings } from '../context/SettingsContext';
 
@@ -13,21 +14,22 @@ const AnimatedPiece = ({ from, to, piece, onFinish, myRole, cellSize }) => {
   } = useSettings();
 
   const kingStyle = piece.player === 1 ? myKingStyle : opponentKingStyle;
-  
-  const offsetX = -10;
-  const offsetY = -10;
+  const pieceColor = piece.player === 1 ? myPieceColor : opponentPieceColor;
 
+  // ← Создаём значения ПРЯМО в компоненте (не в useRef!)
+  const translateX = new Animated.Value(0);
+  const translateY = new Animated.Value(0);
+
+  // ← Вычисляем координаты
   const getDisplayRow = (row) => (myRole === 1 ? 7 - row : row);
 
-  const fromX = from.col * cellSize + cellSize / 2 + offsetX;
-  const fromY = getDisplayRow(from.row) * cellSize + cellSize / 2 + offsetY;
-  const toX = to.col * cellSize + cellSize / 2 + offsetX;
-  const toY = getDisplayRow(to.row) * cellSize + cellSize / 2 + offsetY;
+  const fromX = from.col * cellSize;
+  const fromY = getDisplayRow(from.row) * cellSize;
+  const toX = to.col * cellSize;
+  const toY = getDisplayRow(to.row) * cellSize;
 
-  const translateX = useRef(new Animated.Value(fromX)).current;
-  const translateY = useRef(new Animated.Value(fromY)).current;
-
-  const pieceColor = piece.player === 1 ? myPieceColor : opponentPieceColor;
+  const deltaX = toX - fromX;
+  const deltaY = toY - fromY;
 
   const darkenColor = (color) => {
     if (color?.startsWith('#')) {
@@ -53,56 +55,92 @@ const AnimatedPiece = ({ from, to, piece, onFinish, myRole, cellSize }) => {
   };
 
   useEffect(() => {
+    console.log('🎬 AnimatedPiece: запуск анимации', { from, to, deltaX, deltaY });
+
     Animated.parallel([
       Animated.timing(translateX, {
-        toValue: toX,
-        duration: 400,
+        toValue: deltaX,
+        duration: 300,
         useNativeDriver: true,
       }),
       Animated.timing(translateY, {
-        toValue: toY,
-        duration: 400,
+        toValue: deltaY,
+        duration: 300,
         useNativeDriver: true,
       }),
-    ]).start(() => onFinish());
-  }, []);
+    ]).start(() => {
+      console.log('✅ AnimatedPiece: анимация завершена');
+      onFinish();
+    });
 
-  // Если это дамка – отображаем только эмодзи
+    // ← Очистка при размонтировании
+    return () => {
+      translateX.stopAnimation();
+      translateY.stopAnimation();
+    };
+  }, [deltaX, deltaY]);
+
+  // ← Контейнер с absolute позиционированием
   if (piece.king) {
     return (
-      <Animated.View style={[styles.kingContainer, { transform: [{ translateX }, { translateY }] }]}>
-        <Text style={[styles.kingEmoji, { color: kingCrownColor }]}>
-          {renderKingSymbol()}
-        </Text>
-      </Animated.View>
+      <View style={[styles.absoluteContainer, { left: fromX, top: fromY }]}>
+        <Animated.View style={[
+          styles.kingContainer,
+          {
+            transform: [
+              { translateX },
+              { translateY },
+            ],
+          },
+        ]}>
+          <Text style={[styles.kingEmoji, { color: kingCrownColor }]}>
+            {renderKingSymbol()}
+          </Text>
+        </Animated.View>
+      </View>
     );
   }
 
-  // Обычная шашка
   return (
-    <Animated.View style={[styles.container, { transform: [{ translateX }, { translateY }] }]}>
-      <LinearGradient
-        colors={[pieceColor, darkenColor(pieceColor)]}
-        style={styles.piece}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      />
-    </Animated.View>
+    <View style={[styles.absoluteContainer, { left: fromX, top: fromY }]}>
+      <Animated.View style={[
+        styles.container,
+        {
+          transform: [
+            { translateX },
+            { translateY },
+          ],
+        },
+      ]}>
+        <LinearGradient
+          colors={[pieceColor, darkenColor(pieceColor)]}
+          style={styles.piece}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        />
+      </Animated.View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  absoluteContainer: {
     position: 'absolute',
-    width: 38,
-    height: 38,
+    width: 45,
+    height: 45,
+    zIndex: 1000,
+    elevation: 1000,
+  },
+  container: {
+    width: 45,
+    height: 45,
     justifyContent: 'center',
     alignItems: 'center',
   },
   piece: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.4,
@@ -112,9 +150,8 @@ const styles = StyleSheet.create({
     borderColor: '#888',
   },
   kingContainer: {
-    position: 'absolute',
-    width: 38,
-    height: 38,
+    width: 45,
+    height: 45,
     justifyContent: 'center',
     alignItems: 'center',
   },

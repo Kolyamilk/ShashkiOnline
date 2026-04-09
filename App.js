@@ -26,6 +26,7 @@ import { colors } from './src/styles/globalStyles';
 import { GameTypeProvider } from './src/context/GameTypeContext';
 import GameTypeScreen from './src/screens/GameTypeScreen';
 import { InviteProvider } from './src/context/InviteContext';
+import ProfileGiftScreen from './src/screens/ProfileGiftScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -396,6 +397,7 @@ function AppNavigator() {
               <Stack.Screen name="Chat" component={ChatScreen} />
               <Stack.Screen name="Players" component={PlayersScreen} />
               <Stack.Screen name="PlayerProfile" component={PlayerProfileScreen} />
+              <Stack.Screen name="GiftScreen" component={ProfileGiftScreen} />
             </>
           )}
         </Stack.Navigator>

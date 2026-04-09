@@ -126,7 +126,6 @@ const MenuScreen = ({ navigation }) => {
         {/* Заголовок */}
         <View style={styles.headerSection}>
           <Text style={styles.title}>Шашки и точка</Text>
-          <Text style={styles.subtitle}>Добро пожаловать!</Text>
         </View>
 
         {/* Кнопки меню */}
@@ -277,12 +276,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#aaa',
-    fontWeight: '400',
-  },
-
   /* Кнопки меню */
   centerContainer: {
     alignItems: 'center',

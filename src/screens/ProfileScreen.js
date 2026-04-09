@@ -54,6 +54,9 @@ const ProfileScreen = ({ navigation }) => {
   const goBack = () => {
     navigation.navigate('Menu');
   };
+  const giftScreen =()=>{
+    navigation.navigate('GiftScreen')
+  }
 
   if (loading) {
     return (
@@ -84,7 +87,19 @@ const ProfileScreen = ({ navigation }) => {
     <View style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.avatar}>{userData.avatar}</Text>
-        <Text style={styles.name}>{userData.name}</Text>
+        <Text style={styles.name}>{userData.name} <TouchableOpacity  onPress={handleLogout}>
+          <Text style={styles.closeBtn}>x</Text>
+        </TouchableOpacity>
+        </Text>
+
+        <View style={styles.profileBtns}>
+           <TouchableOpacity onPress={giftScreen}>
+          <Text  style={styles.gift}>
+            🎁
+          </Text>
+        </TouchableOpacity>
+      </View>
+       
         <View style={styles.statsContainer}>
           <Text style={styles.statsText}>Сыграно игр: {totalGames}</Text>
           <Text style={styles.statsText}>Побед: {wins}</Text>
@@ -93,9 +108,6 @@ const ProfileScreen = ({ navigation }) => {
       </View>
 
       <View style={styles.buttonsContainer}>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.buttonText}>Выйти из аккаунта</Text>
-        </TouchableOpacity>
         <TouchableOpacity style={styles.backButton} onPress={goBack}>
           <Text style={styles.buttonText}>Назад</Text>
         </TouchableOpacity>
@@ -154,7 +166,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     borderRadius: 30,
     alignItems: 'center',
-    
+  },
+  closeBtn:{
+  color:'red',
+  fontSize:20,
+  fontWeight:'bold',
   },
   buttonText: {
     color: '#fff',
@@ -166,6 +182,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: 20,
   },
+  profileBtns:{
+    marginBottom:20
+  },
+  gift:{
+    fontSize:50
+  }
 });
 
 export default ProfileScreen;
